@@ -19,12 +19,15 @@
 # - [x] Add mixing of operators (Eg. 3 - 5 * 2 ^ 2)
 # - [x] Add parenthesis (Eg. (3 - 5) * 2)
 # - [x] Add floating point nums
+# - [x] Build an AST (abstract syntax tree)
+# - [x] Interpret using the AST
+
 
 # Grammar
 # 1) Chaining + and - operators (eg. 4 - 5 + 3 - 7) 
 ################################################################
 #   expr : term ((ADD | SUB) term)*                            #                       
-#   term : NUMBER                                             #                              
+#   term : NUMBER                                              #                              
 #                                                              # 
 ################################################################
 
@@ -33,7 +36,7 @@
 #   expr : term ((ADD | SUB) term)*                            # 
 #   term : factor ((MUL | DIV) factor)*                        # 
 #   factor : base (RAISETO factor)*                            # 
-#   base : NUMBER                                             # 
+#   base : NUMBER                                              # 
 #                                                              #     
 ################################################################
 
@@ -42,7 +45,7 @@
 #   expr : term ((ADD | SUB) term)*                            #     
 #   term : factor ((MUL | DIV ) factor)*                       # 
 #   factor : base (RAISETO factor)*                            #             
-#   base: NUMBER | \( expr \)                                 #             
+#   base: NUMBER | \( expr \)                                  #             
 ################################################################
 
 import re
@@ -97,6 +100,7 @@ class Token:
     def __repr__(self):
         return self.__str__()
 
+
 class Lexer:
     """
     The Lexer class for parsing analyzing the string and building tokens from it
@@ -109,11 +113,9 @@ class Lexer:
         self._tokl_built: bool = False
         self.token_list: list[Token] = []
 
-
     def _error(self) -> None:
         raise Exception("Error parsing the input")
     
-    # build the token list from the input str
     def _build_tokens(self) -> None:
         """
         Populates the token list from the input str
@@ -138,7 +140,6 @@ class Lexer:
                                 tok_val = float(pat_match.group(0))
                             except:
                                 pass
-                       
                         # got the token
                         ret_token: Token = Token(tok_tag, tok_val)
                         self.token_list.append(ret_token)
@@ -147,7 +148,6 @@ class Lexer:
             # when no pattern is matched
             if not pat_match:
                 self._error()
-
             else:
                 self._pos = pat_match.end(0)
         
@@ -169,7 +169,46 @@ class Lexer:
         return token
 
 
-class Interpreter:
+# ====================== PARSER (using AST) ======================= #
+class AST:
+    """
+    The base node class
+    """
+    pass
+
+class BinOprNode(AST):
+    """
+    The node class to represent the binary operators
+
+    left_child : holds the operand on the left (can be another BinOprNode) 
+    right_child : holds the operand on the right (can be another BinOprNode)
+
+    Eg.
+            "*"
+           /   \
+         "-"   "7"
+        /   \
+       "2"  "3"
+
+    This will result in the expression: (2 - 3) * 7
+
+    """
+    def __init__(self, left_child, opr, right_child):
+        self.left_child = left_child
+        self.token = self.opr = opr
+        self.right_child = right_child
+
+
+class NumNode(AST):
+    """
+    The node class to represent numbers
+    """
+    def __init__(self, num_tok: Token):
+        self.num_tok: Token = num_tok
+        self.node_val = num_tok.val
+    
+
+class Parser:
     """
     Class attributes:
     self.lexer : The Lexer instance to avoid crowding in this class
@@ -206,71 +245,127 @@ class Interpreter:
 
         if token.type == NUMBER:
             self.consume(self._curr_token.type)
-            
             # take a peek at the next token...
-            # if two integer tokens are side by side without any operator between them, thats a syntax error
+            # if two integer tokens are side by side 
+            # without any operator between them, thats a syntax error
             nxt_tok: Token = self._curr_token
             if nxt_tok.type == NUMBER:
                 self._error()
             
-            return token.val
+            return NumNode(token)
         
         elif token.type == LPAREN:
             self.consume(LPAREN)
             # call expr for calculating the expression inside both the parenthesis
-            res = self.expr()
+            node = self.expr()
             # after the expression is done calculating, the right parenthesis will only be present
             # as no other method is checking for the right paren token type
             self.consume(RPAREN)
             # return the result at last
-            return res
+            return node
         
     def _factor(self):
         """
         The factor as defined in the grammar of chaining (no. 2)
         """
-        # result from calling the base method
-        res = self._base()
+        # node from calling the base method
+        node_base = self._base()
 
         while self._curr_token.type == EXP:
             token: Token = self._curr_token
             self.consume(self._curr_token.type)
             # call factor recursively, Eg. 3^3^3
             # it evals to 3^27
-            res = opr_funcs[token.val](res, self._factor())
+            node_base = BinOprNode(left_child=node_base, opr=token, right_child=self._factor())
 
-        return res
+        return node_base
 
     def _term(self):
         """
         The term as defined in the grammar of chaining (no. 2)
         """
-        # result from calling the factor method
-        res_fac = self._factor()
+        # node from calling the factor method
+        node_fac = self._factor()
 
         while self._curr_token.type in (MUL, DIV):
             token: Token = self._curr_token
             self.consume(self._curr_token.type)
-            res_fac = opr_funcs[token.val](res_fac, self._factor())
+            
+            node_fac = BinOprNode(left_child=node_fac, opr=token, right_child=self._factor())
         
-        return res_fac
+        return node_fac
 
-    # Start evaluating
+    # build the root node
     def expr(self):
         """
-        Evaluates the expression, from the tokens
+        Builds the AST root node
         """
         # finally get the term
-        res = self._term()
+        node_term = self._term()
 
-        # loop untill current token is any operator and add that to result
         while self._curr_token.type in (ADD, SUB):
             token: Token = self._curr_token
             self.consume(self._curr_token.type)
-            res = opr_funcs[token.val](res, self._term())
+            
+            node_term = BinOprNode(left_child=node_term, opr=token, right_child=self._term())
 
-        # return the res, once all the input is parsed
-        return res
+        # return the root node
+        return node_term
+
+    def parse(self):
+        """
+        Returns the root node of the AST i.e. self.expr()
+        """
+        return self.expr()
+
+
+# =========================== INTERPRETER (using NodeVisitor) =================== #
+class NodeVisitor:
+    """
+    The nodevisitor that dispatches the appropriate method for the 
+    type of Node visited
+    """
+    def _visit(self, node):
+        method_name = "visit_" + type(node).__name__
+
+        # the dispatched method for the node i.e. visit_BinOprNode or visit_NumNode
+        # when the attr is not present, visitor is the _generic_visit method
+        visit_func = getattr(self, method_name, self._generic_visit)
+        return visit_func(node)
+
+    def _generic_visit(self, node):
+        raise NotImplementedError(f"function visit_{type(node).__name__} is not implemented")
+
+
+class Interpreter(NodeVisitor):
+    """
+    The interpreter class to interpret the prog
+    """
+    def __init__(self, parser: Parser):
+        # takes in a parser 
+        self.parser = parser
+
+    def visit_BinOprNode(self, curr_node):
+        """
+        Return the calculated result from the type of operator by visiting the nodes
+        """
+        # essentially it takes the node's token val, which in case of an operator
+        # is its string representation. Then it looks up the opr_funcs dict 
+        # for the operator function related to the string repr and calculates the result,
+        # on the left and right childs of the curr_node (which inturn can be expressions)
+        # ? i agree this is plain confusing to read
+        return opr_funcs[curr_node.token.val](self._visit(curr_node.left_child),
+                self._visit(curr_node.right_child))
+        
+    # when the dispatched method is visit_NumNode, return the node's value
+    def visit_NumNode(self, curr_node):
+        return curr_node.node_val
+
+    # finally...
+    def interpret(self):
+        root_node = self.parser.parse()
+        # ? the visiting starts
+        return self._visit(root_node)
 
 
 def main():
@@ -289,8 +384,9 @@ def main():
             continue
 
         lexer = Lexer(input_str)
-        interp = Interpreter(lexer)
-        res = interp.expr()
+        parser = Parser(lexer)
+        interp = Interpreter(parser)
+        res = interp.interpret()
         print(res)
 
 if __name__ == "__main__":
