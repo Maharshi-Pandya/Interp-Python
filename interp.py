@@ -258,10 +258,10 @@ class Parser:
             self.consume(LPAREN)
             # call expr for calculating the expression inside both the parenthesis
             node = self.expr()
-            # after the expression is done calculating, the right parenthesis will only be present
+            # after the expression is done parsing, the right parenthesis will only be present
             # as no other method is checking for the right paren token type
             self.consume(RPAREN)
-            # return the result at last
+            # return the node
             return node
         
     def _factor(self):
@@ -275,7 +275,7 @@ class Parser:
             token: Token = self._curr_token
             self.consume(self._curr_token.type)
             # call factor recursively, Eg. 3^3^3
-            # it evals to 3^27
+            # equals to 3^27
             node_base = BinOprNode(left_child=node_base, opr=token, right_child=self._factor())
 
         return node_base
@@ -329,7 +329,7 @@ class NodeVisitor:
         method_name = "visit_" + type(node).__name__
 
         # the dispatched method for the node i.e. visit_BinOprNode or visit_NumNode
-        # when the attr is not present, visitor is the _generic_visit method
+        # when the attr is not present, visit_func is then the _generic_visit method
         visit_func = getattr(self, method_name, self._generic_visit)
         return visit_func(node)
 

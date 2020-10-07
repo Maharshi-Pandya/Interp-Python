@@ -4,6 +4,8 @@
 - Currently it supports arthimetic operation interpretation only.
 - More features to be added
 
+(As the code grows, will start chopping it up into individual files/modules)
+
 ### Usage 
 
 ```
