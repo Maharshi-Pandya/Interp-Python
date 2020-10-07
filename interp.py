@@ -1,4 +1,4 @@
-#!usr/bin/python3
+#!usr/bin/python3.9
 # -*- coding: utf-8 -*-
 
 # This python prog is an attempt to make a PASCAL lang interpreter
@@ -11,20 +11,20 @@
 # Also, the interpreter will have an execute method which executes (evaluates) the input string
 
 # Program Task Flow: 
-# - [x] Interpret the arithmetic expression INTEGER -> ADD -> INTEGER (single digit integer)
+# - [x] Interpret the arithmetic expression NUMBER -> ADD -> NUMBER (single digit integer)
 # - [x] Add whitespace allowance (Eg. 3 + 5 is also valid)
-# - [x] Interpret the arithmetic expression INTEGER -> ADD | SUB -> INTEGER (multiple digit integer) 
+# - [x] Interpret the arithmetic expression NUMBER -> ADD | SUB -> NUMBER (multiple digit integer) 
 # - [x] Add chaining in the expressions (Eg. 3 + 5 - 4 + 2)
 # - [x] Add multiplication and division
 # - [x] Add mixing of operators (Eg. 3 - 5 * 2 ^ 2)
 # - [x] Add parenthesis (Eg. (3 - 5) * 2)
-
+# - [x] Add floating point nums
 
 # Grammar
 # 1) Chaining + and - operators (eg. 4 - 5 + 3 - 7) 
 ################################################################
 #   expr : term ((ADD | SUB) term)*                            #                       
-#   term : INTEGER                                             #                              
+#   term : NUMBER                                             #                              
 #                                                              # 
 ################################################################
 
@@ -33,7 +33,7 @@
 #   expr : term ((ADD | SUB) term)*                            # 
 #   term : factor ((MUL | DIV) factor)*                        # 
 #   factor : base (RAISETO factor)*                            # 
-#   base : INTEGER                                             # 
+#   base : NUMBER                                             # 
 #                                                              #     
 ################################################################
 
@@ -42,35 +42,50 @@
 #   expr : term ((ADD | SUB) term)*                            #     
 #   term : factor ((MUL | DIV ) factor)*                       # 
 #   factor : base (RAISETO factor)*                            #             
-#   base: INTEGER | \( expr \)                                 #             
+#   base: NUMBER | \( expr \)                                 #             
 ################################################################
 
-INTEGER, ADD, SUB, MUL, DIV, EXP, LPAREN, RPAREN, EOF = ("INTEGER", "ADD", "SUB", "MUL", "DIV",
-        "EXP", "LPAREN", "RPAREN" ,"EOF")
-VALID_OPERS = {
-                "+": ADD,
-                "-": SUB,
-                "*": MUL,
-                "/": DIV,
-                "^": EXP
-            }
+import re
+import operator   
 
-PARENS = {
-            "(": LPAREN,
-            ")": RPAREN
+NUMBER, ADD, SUB, MUL, DIV, EXP, LPAREN, RPAREN, EOF = ("NUMBER", "ADD", "SUB", "MUL", "DIV",
+        "EXP", "LPAREN", "RPAREN" ,"EOF")
+
+TOKEN_EXPRS = [
+            # for white spaces
+            (r"[ \n\t]+", None),
+            (r"\(", LPAREN),
+            (r"\)", RPAREN),
+            (r"\*\*", EXP),
+            (r"/", DIV),
+            (r"\*", MUL),
+            (r"\+", ADD),
+            (r"-", SUB),
+            # ints and floats pattern
+            (r"[0-9]*\.?[0-9]+", NUMBER),
+        ]
+
+# will be handy when breaking down into terms, factors, bases etc...
+opr_funcs = {
+            "**": operator.pow,
+            "/": operator.truediv,
+            "*": operator.mul,
+            "+": operator.add,
+            "-": operator.sub
         }
 
 
 class Token:
     """
-    Token Types:
-
-    INTEGER, ADD, EOF (end of file/input)
+    Token attrs:
+    
+    type: The token tag (eg. NUMBER, ADD, SUB etc...)
+    val:
+        - Numerical value for ints and floats
+        - operator function for operators
     """
     def __init__(self, type, val):
-        # INTEGER, ADD, EOF
         self.type = type
-        # token value: 0,1,2,3,4,5,6,7,8,9,'+','-' or None
         self.val = val
 
     def __str__(self):
@@ -86,73 +101,72 @@ class Lexer:
     """
     The Lexer class for parsing analyzing the string and building tokens from it
     """
-    def __init__(self, input_str):
-        self._input_str = input_str
-        self._pos = 0
-        self.curr_char = self._input_str[self._pos]
+    def __init__(self, input_str: str):
+        self._input_str: str = input_str
+        self._pos = self._list_pos = 0
+        self.curr_char: chr = self._input_str[self._pos]
+        # bool to check if the token list is populated
+        self._tokl_built: bool = False
+        self.token_list: list[Token] = []
+
 
     def _error(self) -> None:
         raise Exception("Error parsing the input")
-
-    # advance through the input_str
-    def _advance(self) -> None:
-        self._pos += 1
-        if self._pos > len(self._input_str) - 1:
-            self.curr_char = None # indicated the end of input
-        # move fwd in the input str
-        else:
-            self.curr_char = self._input_str[self._pos]
-
-    def _ign_whitespaces(self) -> None:
+    
+    # build the token list from the input str
+    def _build_tokens(self) -> None:
         """
-        Ignores the whitespaces in the input string
+        Populates the token list from the input str
         """
-        while self.curr_char is not None and self.curr_char.isspace():
-            self._advance()
+        while self._pos < len(self._input_str):
+            # the matched pattern for any token 
+            pat_match = None
+            for tok_expr in TOKEN_EXPRS:
+                patrn, tok_tag = tok_expr
+                tok_pat = re.compile(patrn)
+                pat_match = tok_pat.match(self._input_str, self._pos)
+                # when the pattern is matched
+                if pat_match:
+                    # ? ignore whitespaces
+                    if tok_tag:
+                        tok_val = pat_match.group(0)
+                        try:
+                            # if pattern matched is an int
+                            tok_val = int(pat_match.group(0))
+                        except ValueError:
+                            try:
+                                tok_val = float(pat_match.group(0))
+                            except:
+                                pass
+                       
+                        # got the token
+                        ret_token: Token = Token(tok_tag, tok_val)
+                        self.token_list.append(ret_token)
+                    break
 
-    def _read_int(self):
-        """
-        If lexer encounters a digit, this checks if it is a multi digit int
-        """
-        res_int: str = ""
-        while self.curr_char is not None and self.curr_char.isdigit():
-            res_int += self.curr_char
-            self._advance()
-        return res_int
+            # when no pattern is matched
+            if not pat_match:
+                self._error()
 
-    # Build the next token from the current char
+            else:
+                self._pos = pat_match.end(0)
+        
+        # token list is built
+        self._tokl_built = True
+
     def _nxt_token(self) -> Token:
         """
-        Returns the next token by reading the current char
+        Return the next token from the token list
         """
-        while self.curr_char is not None:
+        if not self._tokl_built:
+            self._build_tokens()
 
-            if self.curr_char.isspace():
-                self._ign_whitespaces()
-                continue
-
-            # isdigit or an operator
-            if self.curr_char.isdigit():
-                dig_token = Token(INTEGER, int(self._read_int()))
-                return dig_token
-
-            # lookup the VALID_OPERS dict for the current char
-            # VALID_OPERS[curr_char] gives the type of operator
-            if self.curr_char in list(VALID_OPERS.keys()):
-                opr_token = Token(VALID_OPERS[self.curr_char], self.curr_char)
-                self._advance()
-                return opr_token
-
-            if self.curr_char in list(PARENS.keys()):
-                paren_token = Token(PARENS[self.curr_char], self.curr_char)
-                self._advance()
-                return paren_token
-
-            # if we reach here, parsing error occurred
-            self._error()
-
-        # if current char becomes None, EOF occurred
-        return Token(EOF, None)
+        if self._list_pos > len(self.token_list) - 1:
+            return Token(EOF, None)
+        
+        token: Token = self.token_list[self._list_pos]
+        self._list_pos += 1
+        return token
 
 
 class Interpreter:
@@ -166,14 +180,14 @@ class Interpreter:
     self._error : When any parsing error occurs
     """
     def __init__(self, lexer):
-        self.lexer = lexer
+        self.lexer: Lexer = lexer
         # set the current token via lexer's next token method
         self._curr_token: Token = self.lexer._nxt_token()
   
-    def _error(self):
-        raise Exception("Invalid syntax")
+    def _error(self) -> None: 
+        raise SyntaxError("Invalid syntax")
     
-    def consume(self, token_type) -> None:
+    def consume(self, token_type: str) -> None:
         """
         If current token type equals the token_type, "consume" and get/set the next token
         """
@@ -188,18 +202,19 @@ class Interpreter:
         """
         The Base defined in grammar of chaining (no. 2)
         """
-        token = self._curr_token
+        token: Token = self._curr_token
 
-        if token.type == INTEGER:
+        if token.type == NUMBER:
             self.consume(self._curr_token.type)
             
             # take a peek at the next token...
             # if two integer tokens are side by side without any operator between them, thats a syntax error
-            nxt_tok = self._curr_token
-            if nxt_tok.type == INTEGER:
+            nxt_tok: Token = self._curr_token
+            if nxt_tok.type == NUMBER:
                 self._error()
             
             return token.val
+        
         elif token.type == LPAREN:
             self.consume(LPAREN)
             # call expr for calculating the expression inside both the parenthesis
@@ -218,13 +233,13 @@ class Interpreter:
         res = self._base()
 
         while self._curr_token.type == EXP:
+            token: Token = self._curr_token
             self.consume(self._curr_token.type)
             # call factor recursively, Eg. 3^3^3
             # it evals to 3^27
-            res = pow(res, self._factor())
+            res = opr_funcs[token.val](res, self._factor())
 
         return res
-
 
     def _term(self):
         """
@@ -234,16 +249,11 @@ class Interpreter:
         res_fac = self._factor()
 
         while self._curr_token.type in (MUL, DIV):
-            if self._curr_token.type == MUL:
-                # calc the result by calling the next factor as done below
-                self.consume(self._curr_token.type)
-                res_fac *= self._factor()
-            elif self._curr_token.type == DIV:
-                self.consume(self._curr_token.type)
-                res_fac /= self._factor()
+            token: Token = self._curr_token
+            self.consume(self._curr_token.type)
+            res_fac = opr_funcs[token.val](res_fac, self._factor())
         
         return res_fac
-
 
     # Start evaluating
     def expr(self):
@@ -255,14 +265,9 @@ class Interpreter:
 
         # loop untill current token is any operator and add that to result
         while self._curr_token.type in (ADD, SUB):
-            # consume the token and add the next term to result
-            if self._curr_token.type == ADD:
-                self.consume(self._curr_token.type)
-                res += self._term()
-            elif self._curr_token.type == SUB:
-                self.consume(self._curr_token.type)
-                res -= self._term()
-
+            token: Token = self._curr_token
+            self.consume(self._curr_token.type)
+            res = opr_funcs[token.val](res, self._term())
 
         # return the res, once all the input is parsed
         return res
@@ -271,7 +276,7 @@ class Interpreter:
 def main():
     while True:
         try:
-            input_str = input("calc> ")
+            input_str: str = input("calc> ")
         except EOFError:
             print("Unexpected EOF when reading the input\n")
             break
