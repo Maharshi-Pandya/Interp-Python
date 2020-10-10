@@ -21,7 +21,7 @@
 # - [x] Add floating point nums
 # - [x] Build an AST (abstract syntax tree)
 # - [x] Interpret using the AST
-
+# - [x] Add Unary operator support
 
 # Grammar
 # 1) Chaining + and - operators (eg. 4 - 5 + 3 - 7) 
@@ -40,12 +40,12 @@
 #                                                              #     
 ################################################################
 
-# 3) Chaining with parenthesis (eg. 7 - (5 * 2) ^ 3)
+# 3) Chaining with parenthesis (eg. 7 - (5 * 2) ^ 3) and unary oprs
 ################################################################
 #   expr : term ((ADD | SUB) term)*                            #     
 #   term : factor ((MUL | DIV ) factor)*                       # 
 #   factor : base (RAISETO factor)*                            #             
-#   base: NUMBER | \( expr \)                                  #             
+#   base: (ADD | SUB) base | NUMBER | \( expr \)               #             
 ################################################################
 
 import re
@@ -176,6 +176,27 @@ class AST:
     """
     pass
 
+class UnaryOprNode(AST):
+    """
+    The node class to represent the unary operators
+
+    child: holds the operand (can be another AST node)
+
+    Eg. 
+            
+            "+"
+             |
+            "-"
+             |
+            "3"
+    
+    This will result in expression: +-3 or -3
+    """
+    def __init__(self, opr, child):
+        self.token = self.opr = opr
+        self.child = child
+
+
 class BinOprNode(AST):
     """
     The node class to represent the binary operators
@@ -243,7 +264,17 @@ class Parser:
         """
         token: Token = self._curr_token
 
-        if token.type == NUMBER:
+        if token.type == ADD:
+            self.consume(ADD)
+            unary_plus_node = UnaryOprNode(token, self._base())
+            return unary_plus_node
+
+        elif token.type == SUB:
+            self.consume(SUB)
+            unary_minus_node = UnaryOprNode(token, self._base())
+            return unary_minus_node
+
+        elif token.type == NUMBER:
             self.consume(self._curr_token.type)
             # take a peek at the next token...
             # if two integer tokens are side by side 
@@ -357,9 +388,19 @@ class Interpreter(NodeVisitor):
         return opr_funcs[curr_node.token.val](self._visit(curr_node.left_child),
                 self._visit(curr_node.right_child))
         
-    # when the dispatched method is visit_NumNode, return the node's value
+    # ? when the dispatched method is visit_NumNode, return the node's value
     def visit_NumNode(self, curr_node):
         return curr_node.node_val
+
+    # ? when the dispatched node is visit_UnaryOprNode
+    def visit_UnaryOprNode(self, curr_node):
+        """
+        Return the calculated result by visiting the node
+        """
+        if curr_node.token.type == ADD:
+            return +self._visit(curr_node.child)
+        elif curr_node.token.type == SUB:
+            return -self._visit(curr_node.child)
 
     # finally...
     def interpret(self):
